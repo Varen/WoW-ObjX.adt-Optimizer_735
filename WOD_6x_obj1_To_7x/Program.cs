@@ -12,12 +12,11 @@ namespace WOD_6x_obj1_To_7x
         {
             if(args.Length == 0)
             {
-                Console.WriteLine("Drag and drop the _obj0 files on the executable to use this program.");
-                Console.WriteLine("To generate bboxes, add 'extractBBoxes' as command line argument");
-                Console.ReadLine();
-                return;
+                args = Directory.GetFiles(Directory.GetCurrentDirectory(),"*_obj0.adt");
+
+                Console.WriteLine("Found " + args.Length + " files.");
             }
-            // Mode 0: ExtractBBoxes from obj1s
+            // Mode 0: ExtractBBoxes from m2s
             if(args[0] == "extractBBoxes")
             {
                 GenerateBBOxesFile();
@@ -46,6 +45,7 @@ namespace WOD_6x_obj1_To_7x
                 }
             }
             Console.WriteLine("All Done!");
+            Console.Beep();
             Console.ReadLine();
         }
 
@@ -120,18 +120,20 @@ namespace WOD_6x_obj1_To_7x
                 boxMax.Y = br.ReadSingle();
                 boxMax.Z = br.ReadSingle();
 
-                ModelName_To_DefaultAABox[modelName] = new ModelData(boxMin, boxMax);
+                ModelName_To_DefaultAABox[modelName.ToLower()] = new ModelData(boxMin, boxMax);
             }
             br.Close();
         }
 
         private static void GenerateBBOxesFile()
         {
-            string[] allObj1s = Directory.GetFiles("input", "*.m2", SearchOption.AllDirectories);
+            string[] allM2s = Directory.GetFiles("input", "*.m2", SearchOption.AllDirectories);
 
+            Console.WriteLine("Found " + allM2s.Length + " files.");
 
-            foreach (var file in allObj1s)
+            foreach (var file in allM2s)
             {
+                Console.Write('.');
                 BinaryReader br = new BinaryReader(File.OpenRead(file));
                 br.BaseStream.Seek(0x0A0, SeekOrigin.Begin);
 
@@ -145,7 +147,7 @@ namespace WOD_6x_obj1_To_7x
                 boxMax.X = br.ReadSingle();
                 boxMax.Y = br.ReadSingle();
                 boxMax.Z = br.ReadSingle();
-                ModelName_To_DefaultAABox[file.Substring(6).Replace('\\','/')] = new ModelData(boxMin, boxMax);
+                ModelName_To_DefaultAABox[file.Substring(6).Replace('\\','/').ToLower()] = new ModelData(boxMin, boxMax);
                 br.Close();
             }
             SaveDefaultBoxData("BoundingBoxData.dat");
@@ -154,7 +156,7 @@ namespace WOD_6x_obj1_To_7x
         // Convenience
         static float ToRadian(float x)
         {
-            return Convert.ToSingle(Math.PI * x / 180.0);
+            return Convert.ToSingle(Math.PI * x / 180.0f);
         }
 
         class ModelInstanceData
@@ -172,7 +174,7 @@ namespace WOD_6x_obj1_To_7x
                 // Turn the default aabbox into  vertices
                 float[][] vec = new float[8][];
                 
-                vec[0] = Vec4.FromValues(min.X,min.Y,min.Z,1);
+                vec[0] = Vec4.FromValues(min.X ,min.Y, min.Z,1);
                 vec[1] = Vec4.FromValues(max.X, max.Y, max.Z, 1);
                 vec[2] = Vec4.FromValues(min.X, min.Y, max.Z, 1);
                 vec[3] = Vec4.FromValues(min.X, max.Y, min.Z, 1);
@@ -243,11 +245,12 @@ namespace WOD_6x_obj1_To_7x
                 placementMatrix = Mat4.RotateZ(placementMatrix, placementMatrix, ToRadian(-rotation.X));
                 placementMatrix = Mat4.RotateX(placementMatrix, placementMatrix, ToRadian(rotation.Z - 90));
 
-                float[] scaleVector = {scale / 1024.0f, scale / 1024.0f, scale / 1024.0f};
+                float[] scaleVector = {scale / 1024.0f, scale / 1024.0f, scale / 1024.0f };
                 placementMatrix = Mat4.Scale(placementMatrix, placementMatrix, scaleVector);
 
                 // Take the default box and apply the transform
-                SetAsPlacedAABBox(ModelName_To_DefaultAABox[modelName].AABBoxMin, ModelName_To_DefaultAABox[modelName].AABBoxMax, placementMatrix);
+                string modelToFind = modelName.ToLower().Replace('\\', '/');
+                SetAsPlacedAABBox(ModelName_To_DefaultAABox[modelToFind].AABBoxMin, ModelName_To_DefaultAABox[modelToFind].AABBoxMax, placementMatrix);
             }
         }
         const float ServerClientCoordinateDifference = 51200.0f / 3.0f;
