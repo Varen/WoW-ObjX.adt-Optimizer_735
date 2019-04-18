@@ -1,9 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.IO;
-using System.Linq;
 using System.Text;
-using System.Threading.Tasks;
+using Ara3D;
 
 namespace WOD_6x_obj1_To_7x
 {
@@ -60,23 +59,27 @@ namespace WOD_6x_obj1_To_7x
             {
                 AABBoxMin = aabox_min;
                 AABBoxMax = aabox_max;
+                radius = 0;
 
                 if (calcRadius)
                 {
-                    float tempRadius = Math.Abs(AABBoxMax.X - AABBoxMin.X);
+                    RecalcRadius();
+                }
+            }
+
+            public void RecalcRadius()
+            {
+                float tempRadius = Math.Abs(AABBoxMax.X - AABBoxMin.X);
+                radius = tempRadius;
+
+                tempRadius = Math.Abs(AABBoxMax.Y - AABBoxMin.Y);
+                if (tempRadius > radius)
                     radius = tempRadius;
 
-                    tempRadius = Math.Abs(AABBoxMax.Y - AABBoxMin.Y);
-                    if (tempRadius > radius)
-                        radius = tempRadius;
+                tempRadius = Math.Abs(AABBoxMax.Z - AABBoxMin.Z);
 
-                    tempRadius = Math.Abs(AABBoxMax.Z - AABBoxMin.Z);
-
-                    if (tempRadius > radius)
-                        radius = tempRadius;
-                }
-                else
-                    radius = 0;
+                if (tempRadius > radius)
+                    radius = tempRadius;
             }
         }
 
@@ -148,6 +151,11 @@ namespace WOD_6x_obj1_To_7x
             SaveDefaultBoxData("BoundingBoxData.dat");
         }
 
+        // Convenience
+        static float ToRadian(float x)
+        {
+            return Convert.ToSingle(Math.PI * x / 180.0);
+        }
 
         class ModelInstanceData
         {
@@ -158,18 +166,88 @@ namespace WOD_6x_obj1_To_7x
             public string modelName;
             public ModelData calculatedAABBox;
 
+
+            void SetAsPlacedAABBox(C3Vector min, C3Vector max, float[] placementMatrix)
+            {
+                // Turn the default aabbox into  vertices
+                float[][] vec = new float[8][];
+                
+                vec[0] = Vec4.FromValues(min.X,min.Y,min.Z,1);
+                vec[1] = Vec4.FromValues(max.X, max.Y, max.Z, 1);
+                vec[2] = Vec4.FromValues(min.X, min.Y, max.Z, 1);
+                vec[3] = Vec4.FromValues(min.X, max.Y, min.Z, 1);
+                vec[4] = Vec4.FromValues(max.X, min.Y, min.Z, 1);
+                vec[5] = Vec4.FromValues(min.X, max.Y, max.Z, 1);
+                vec[6] = Vec4.FromValues(max.X, min.Y, max.Z, 1);
+                vec[7] = Vec4.FromValues(max.X, max.Y, min.Z, 1);
+
+                // Rotate each point properly
+
+                for (int i = 0; i < 8; i++)
+                {
+                    vec[i] = Vec4.TransformMat4(vec[i], vec[i], placementMatrix);
+                }
+
+                calculatedAABBox.AABBoxMin.X = float.MaxValue;
+                calculatedAABBox.AABBoxMin.Y = float.MaxValue;
+                calculatedAABBox.AABBoxMin.Z = float.MaxValue;
+
+                calculatedAABBox.AABBoxMax.X = float.MinValue;
+                calculatedAABBox.AABBoxMax.Y = float.MinValue;
+                calculatedAABBox.AABBoxMax.Z = float.MinValue;
+
+                // Find the mins and maxes to make an AABBox
+                for (int i = 0; i < 8; i++)
+                {
+                    // X
+                    if (vec[i][0] > calculatedAABBox.AABBoxMax.X)
+                        calculatedAABBox.AABBoxMax.X = vec[i][0];
+                    if (vec[i][0] < calculatedAABBox.AABBoxMin.X)
+                        calculatedAABBox.AABBoxMin.X = vec[i][0];
+
+                    // Y
+                    if (vec[i][1] > calculatedAABBox.AABBoxMax.Y)
+                        calculatedAABBox.AABBoxMax.Y = vec[i][1];
+                    if (vec[i][1] < calculatedAABBox.AABBoxMin.Y)
+                        calculatedAABBox.AABBoxMin.Y = vec[i][1];
+
+                    // Z
+                    if (vec[i][2] > calculatedAABBox.AABBoxMax.Z)
+                        calculatedAABBox.AABBoxMax.Z = vec[i][2];
+                    if (vec[i][2] < calculatedAABBox.AABBoxMin.Z)
+                        calculatedAABBox.AABBoxMin.Z = vec[i][2];
+                }
+                calculatedAABBox.RecalcRadius();
+
+            }
+
             public void CalculateBox()
             {
-                // TODO: calculate box here
-                // TEMP:
+                // Prepare the placement matrix
+                var posx = ServerClientCoordinateDifference - position.X;
+                var posy = position.Y;
+                var posz = ServerClientCoordinateDifference - position.Z;
+
+                float[] posVec = { posx, posy, posz };
+
+                var placementMatrix = Mat4.Create();
+                placementMatrix = Mat4.Identity_(placementMatrix);
 
 
+                placementMatrix = Mat4.RotateX(placementMatrix, placementMatrix, ToRadian(90));
+                placementMatrix = Mat4.RotateY(placementMatrix, placementMatrix, ToRadian(90));
 
+                placementMatrix = Mat4.Translate(placementMatrix, placementMatrix, posVec);
 
+                placementMatrix = Mat4.RotateY(placementMatrix, placementMatrix, ToRadian(rotation.Y - 270));
+                placementMatrix = Mat4.RotateZ(placementMatrix, placementMatrix, ToRadian(-rotation.X));
+                placementMatrix = Mat4.RotateX(placementMatrix, placementMatrix, ToRadian(rotation.Z - 90));
 
-                calculatedAABBox.AABBoxMin = new C3Vector(); //ModelName_To_DefaultAABox[modelName].AABBoxMin;
-                calculatedAABBox.AABBoxMax = new C3Vector(); //ModelName_To_DefaultAABox[modelName].AABBoxMax;
-                calculatedAABBox.radius = 50; // This gotta be mathed from biggest distance min-max
+                float[] scaleVector = {scale / 1024.0f, scale / 1024.0f, scale / 1024.0f};
+                placementMatrix = Mat4.Scale(placementMatrix, placementMatrix, scaleVector);
+
+                // Take the default box and apply the transform
+                SetAsPlacedAABBox(ModelName_To_DefaultAABox[modelName].AABBoxMin, ModelName_To_DefaultAABox[modelName].AABBoxMax, placementMatrix);
             }
         }
         const float ServerClientCoordinateDifference = 51200.0f / 3.0f;
