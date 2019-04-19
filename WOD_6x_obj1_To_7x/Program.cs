@@ -2,7 +2,7 @@
 using System.Collections.Generic;
 using System.IO;
 using System.Text;
-using Ara3D;
+using System.Windows.Forms;
 
 namespace WOD_6x_obj1_To_7x
 {
@@ -31,6 +31,8 @@ namespace WOD_6x_obj1_To_7x
                 {
                     Console.WriteLine("Loading BoundingBoxData.dat");
                     LoadDefaultBoxData("BoundingBoxData.dat");
+                    LoadCustomRadiusPerPath("radius_bypath.cfg");
+                    LoadCustomRadiusPerID("radius_byid.cfg");
                     loaded = true;
                 }
                 catch (Exception)
@@ -49,12 +51,68 @@ namespace WOD_6x_obj1_To_7x
             Console.ReadLine();
         }
 
+        private static void LoadCustomRadiusPerPath(string v)
+        {
+            StreamReader sr = new StreamReader(v);
+            while (!sr.EndOfStream)
+            {
+                
+                string[] thingy = sr.ReadLine().Split(';');
+                if(thingy[0].IndexOf("--") == 0)
+                {
+                    continue;
+                }
+                string path = thingy[0].ToLower();
+
+                if(!ModelName_To_DefaultAABox.ContainsKey(path))
+                {
+                    if(!path.Contains(".wmo"))
+                    { 
+                        Console.Beep();
+                        MessageBox.Show("Invalid model path: " + path, "Error");
+                    }
+                    continue;
+                }
+                var val = ModelName_To_DefaultAABox[path];
+                val.radius = Convert.ToSingle(thingy[1]);
+                ModelName_To_DefaultAABox[path] = val;
+            }
+            sr.Close();
+        }
+
+        static Dictionary<uint, float[]> CustomRadiusPerID = new Dictionary<uint, float[]>();
+
+        private static void LoadCustomRadiusPerID(string v)
+        {
+            StreamReader sr = new StreamReader(v);
+            while (!sr.EndOfStream)
+            {
+                string[] thingy = sr.ReadLine().Split(';');
+
+                if (thingy[0].IndexOf("--") == 0)
+                {
+                    continue;
+                }
+
+                uint ID = Convert.ToUInt32(thingy[0]);
+                float addRad = Convert.ToSingle(thingy[1]);
+                float addBounds = Convert.ToSingle(thingy[2]);
+                float[] val = { addRad, addBounds };
+                CustomRadiusPerID[ID] = val;
+            }
+            sr.Close();
+        }
+
         public struct ModelData
         {
             public C3Vector AABBoxMin;
             public C3Vector AABBoxMax;
             public float radius;
 
+            public void SetRadius(float x)
+            {
+                radius = x;
+            }
             public ModelData(C3Vector aabox_min, C3Vector aabox_max, bool calcRadius = false)
             {
                 AABBoxMin = aabox_min;
@@ -84,7 +142,7 @@ namespace WOD_6x_obj1_To_7x
         }
 
         // Contains the string -> default BoundingBox data
-        public static readonly Dictionary<string, ModelData> ModelName_To_DefaultAABox = new Dictionary<string, ModelData>();
+        public static Dictionary<string, ModelData> ModelName_To_DefaultAABox = new Dictionary<string, ModelData>();
 
         static void SaveDefaultBoxData(string saveFile)
         {
@@ -133,9 +191,9 @@ namespace WOD_6x_obj1_To_7x
 
             foreach (var file in allM2s)
             {
-                Console.Write('.');
+                //Console.Write('.');
                 BinaryReader br = new BinaryReader(File.OpenRead(file));
-                br.BaseStream.Seek(0x0A0, SeekOrigin.Begin);
+                br.BaseStream.Seek(0x0A8, SeekOrigin.Begin);
 
                 C3Vector boxMin = new C3Vector();
                 C3Vector boxMax = new C3Vector();
@@ -167,9 +225,9 @@ namespace WOD_6x_obj1_To_7x
 
             public string modelName;
             public ModelData calculatedAABBox;
+            public uint uniqueID;
 
-
-            void SetAsPlacedAABBox(C3Vector min, C3Vector max, float[] placementMatrix)
+            void SetAsPlacedAABBox(C3Vector min, C3Vector max, float[] placementMatrix, float pathRadius)
             {
                 // Turn the default aabbox into  vertices
                 float[][] vec = new float[8][];
@@ -219,7 +277,28 @@ namespace WOD_6x_obj1_To_7x
                     if (vec[i][2] < calculatedAABBox.AABBoxMin.Z)
                         calculatedAABBox.AABBoxMin.Z = vec[i][2];
                 }
-                calculatedAABBox.RecalcRadius();
+
+                if (CustomRadiusPerID.ContainsKey(uniqueID))
+                {
+                    calculatedAABBox.RecalcRadius();
+                    calculatedAABBox.radius *= CustomRadiusPerID[uniqueID][0];
+
+                    calculatedAABBox.AABBoxMin.X -= CustomRadiusPerID[uniqueID][1];
+                    calculatedAABBox.AABBoxMin.Y -= CustomRadiusPerID[uniqueID][1];
+                    calculatedAABBox.AABBoxMin.Z -= CustomRadiusPerID[uniqueID][1];
+
+
+                    calculatedAABBox.AABBoxMax.X += CustomRadiusPerID[uniqueID][1];
+                    calculatedAABBox.AABBoxMax.Y += CustomRadiusPerID[uniqueID][1];
+                    calculatedAABBox.AABBoxMax.Z += CustomRadiusPerID[uniqueID][1];
+
+                }
+                else if (pathRadius != 0)
+                {
+                    calculatedAABBox.radius *= pathRadius;
+                }
+                else
+                    calculatedAABBox.RecalcRadius();
 
             }
 
@@ -244,13 +323,19 @@ namespace WOD_6x_obj1_To_7x
                 placementMatrix = Mat4.RotateY(placementMatrix, placementMatrix, ToRadian(rotation.Y - 270));
                 placementMatrix = Mat4.RotateZ(placementMatrix, placementMatrix, ToRadian(-rotation.X));
                 placementMatrix = Mat4.RotateX(placementMatrix, placementMatrix, ToRadian(rotation.Z - 90));
+                
+                //placementMatrix = Mat4.RotateX(placementMatrix, placementMatrix, ToRadian(rotation.Z - 90));
+                //placementMatrix = Mat4.RotateY(placementMatrix, placementMatrix, ToRadian(rotation.Y - 270));
+                //placementMatrix = Mat4.RotateZ(placementMatrix, placementMatrix, ToRadian(rotation.Y - 180));
+                
 
                 float[] scaleVector = {scale / 1024.0f, scale / 1024.0f, scale / 1024.0f };
                 placementMatrix = Mat4.Scale(placementMatrix, placementMatrix, scaleVector);
 
                 // Take the default box and apply the transform
                 string modelToFind = modelName.ToLower().Replace('\\', '/');
-                SetAsPlacedAABBox(ModelName_To_DefaultAABox[modelToFind].AABBoxMin, ModelName_To_DefaultAABox[modelToFind].AABBoxMax, placementMatrix);
+                
+                SetAsPlacedAABBox(ModelName_To_DefaultAABox[modelToFind].AABBoxMin, ModelName_To_DefaultAABox[modelToFind].AABBoxMax, placementMatrix, ModelName_To_DefaultAABox[modelToFind].radius);
             }
         }
         const float ServerClientCoordinateDifference = 51200.0f / 3.0f;
@@ -378,9 +463,14 @@ namespace WOD_6x_obj1_To_7x
                     uint modelID = br.ReadUInt32();
 
                     thisDoodad.modelName = M2Strings[Convert.ToInt32(modelID)];
+                    
 
                     bw.Write(modelID);
-                    bw.Write(br.ReadUInt32()); // UniqueID
+                    uint uniqueID = br.ReadUInt32();
+
+                    thisDoodad.uniqueID = uniqueID;
+
+                    bw.Write(uniqueID);
 
                     thisDoodad.position.X = br.ReadSingle();
                     thisDoodad.position.Y = br.ReadSingle();
@@ -489,7 +579,10 @@ namespace WOD_6x_obj1_To_7x
                     while (br.BaseStream.Position < myLongEndOffset)
                     {
                         MLMDCount++;
-                        tempBw.Write(br.ReadBytes(32)); // Write Start Of entry
+                        tempBw.Write(br.ReadBytes(4)); // Write Start Of entry
+                        uint uniqueID = br.ReadUInt32();
+                        tempBw.Write(uniqueID);
+                        tempBw.Write(br.ReadBytes(24));
 
                         // We save the wmo bbox for later use, and convert it too 'cause we that good.
                         C3Vector AABBoxMax = new C3Vector();
@@ -505,6 +598,19 @@ namespace WOD_6x_obj1_To_7x
                         AABBoxMin.X = ClientPosToServerPos(br.ReadSingle());
 
                         ModelData md = new ModelData(AABBoxMin, AABBoxMax, true);
+                        if (CustomRadiusPerID.ContainsKey(uniqueID))
+                        {
+                            md.radius *= CustomRadiusPerID[uniqueID][0];
+
+                            md.AABBoxMin.X -= CustomRadiusPerID[uniqueID][1];
+                            md.AABBoxMin.Y -= CustomRadiusPerID[uniqueID][1];
+                            md.AABBoxMin.Z -= CustomRadiusPerID[uniqueID][1];
+
+                            md.AABBoxMax.X += CustomRadiusPerID[uniqueID][1];
+                            md.AABBoxMax.Y += CustomRadiusPerID[uniqueID][1];
+                            md.AABBoxMax.Z += CustomRadiusPerID[uniqueID][1];
+                        }
+
                         WMOBBoxes.Add(md);
 
                         tempBw.Write(br.ReadBytes(8)); // Write rest of Entry
